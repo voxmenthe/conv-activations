@@ -9,6 +9,11 @@ Currently, only CIFAR10 is supported, but I may at some point extend this to var
 * Automated training of several models in succession.
 * Complete logging of trained experiment in CSV files, as well as model checkpoints.
 
+## Requirements:
+* Python 3.5+
+* PyTorch 0.3
+* Torchvision
+
 ## How To Run:
 python3 main_multi.py --epochs 10
 
