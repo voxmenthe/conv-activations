@@ -1,4 +1,21 @@
 ################################################################
+#################### General imports ###########################
+################################################################
+import matplotlib
+matplotlib.use('Agg')
+
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+
+import os
+import time
+import numpy as np
+import pandas as pd
+import argparse
+from tqdm import tqdm
+from functools import partial
+
+################################################################
 ###################### PyTorch Imports ###########################
 ################################################################
 import torch
@@ -13,15 +30,6 @@ import torchvision
 import torchvision.transforms as transforms
 
 from torch.autograd import Variable
-
-################################################################
-#################### General imports ###########################
-################################################################
-
-import os
-import time
-import argparse
-from tqdm import tqdm
 
 ##################################################################
 ############ Imports that are part of this project ###############
@@ -59,15 +67,15 @@ parser.add_argument('--optimizer', type=str, default='SGD',
                     help='Optimizer: choose "Adam", "SGD", "RMSprop" etc')
 parser.add_argument('--lr', type=float, default=0.01,
                     help='learning rate. default=0.01')
-parser.add_argument('--lr-stages', type=int, default=False,
+parser.add_argument('--lr-stages', type=int, default=None,
                     help='set to a number n to decrease lr by factor of lr_increment every 1/n epochs')
 parser.add_argument('--lr-increment', type=float, default=10.,
                     help='used with --lr-stages. amount to divide learning rate by. default=10')
 parser.add_argument('--lr-momentum', type=float, default=None,
                     help='learning rate momentum. default=None, but can use 0.9 etc.')
-parser.add_argument('--lr-decay', type = float, default=1, 
-                    help='learning rate decay. default is 1. set to below one for decay (i.e. .99, .95 etc)')
-parser.add_argument('--lr-floor', type = float, default=0.000001, 
+parser.add_argument('--lr-decay', type = float, default=None, 
+                    help='learning rate decay. set to below one for decay (i.e. .99, .95 etc)')
+parser.add_argument('--lr-floor', type = float, default=0.0001, 
                     help='learning rate floor = minimum learning rate')
 
 ########### Logging and checkpoint settings #############
@@ -168,17 +176,12 @@ for model_position, current_model in enumerate(model_list):
 
     criterion = nn.CrossEntropyLoss()
 
-    # Optimizer
-    lr = args.lr
-    if args.lr_momentum:
-        optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) + \
-            ', momentum=' + str(args.lr_momentum) + ', weight_decay=' + str(1-args.lr_decay) + ')')
-    else:
-        optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) + \
-            ', weight_decay=' + str(1-args.lr_decay) + ')')
-
     # Initialize the learning rate settings
     lr = args.lr
+    if args.lr_momentum:
+        optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) + ', momentum=' + str(args.lr_momentum) +')' )
+    else:
+        optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) +')' )
 
     if args.lr_stages:
         epoch_increment = args.epochs // args.lr_stages
@@ -193,6 +196,7 @@ for model_position, current_model in enumerate(model_list):
     if args.save_training_info:
         train_folder = os.path.join(args.training_info_dir,"train")
         test_folder = os.path.join(args.training_info_dir,"test")
+        plot_folder = os.path.join(args.training_info_dir,"plots")
 
         if not os.path.isdir(train_folder):
             os.makedirs(train_folder)
@@ -200,19 +204,23 @@ for model_position, current_model in enumerate(model_list):
         if not os.path.isdir(test_folder):
             os.makedirs(test_folder)
 
-        training_info_filename = "train" + "_".join([str(x) for x in time.localtime()[0:5]]) + "_" + str(current_model) + '.csv'
+        if not os.path.isdir(plot_folder):
+            os.makedirs(plot_folder)
+
+        timestamp = "_".join([str(x) for x in time.localtime()[0:5]])
+        training_info_filename = "train" + str(timestamp) + "_" + str(current_model) + '.csv'
         training_info_filename = os.path.join(train_folder,training_info_filename)
 
-        testing_info_filename = "test" + "_".join([str(x) for x in time.localtime()[0:5]]) + "_" + str(current_model) + '.csv'
+        testing_info_filename = "test" + str(timestamp) + "_" + str(current_model) + '.csv'
         testing_info_filename = os.path.join(test_folder,testing_info_filename)        
 
         trainfile = open(training_info_filename,"w",encoding="utf-8")
         testfile = open(testing_info_filename,"w",encoding="utf-8")
 
-        header_row = 'trainortest,epoch,batch_idx,num_batches,loss,accuracy,correct,total,batch_loss,lr,batch_accuracy,max_batch_acc,min_batch_acc,total_model_params'
+        header_row = 'trainortest,epoch,batch_idx,num_batches,loss,accuracy,correct,total,batch_loss,lr,batch_accuracy,max_batch_acc,min_batch_acc,total_model_params,'
 
         trainfile.write(str(current_model)+'\n\n')
-        trainfile.write(header_row)
+        trainfile.write(header_row + '\n')
 
         testfile.write('\n' + str(current_model) + '\n')
         testfile.write(header_row + '\n')
@@ -220,8 +228,27 @@ for model_position, current_model in enumerate(model_list):
         combotrainfile.write('\n'+str(current_model)+'\n')
         combotrainfile.write(header_row)
 
-        combotestfile.write(str(current_model)+'\n')
+        combotestfile.write('\n'+str(current_model)+'\n')
         combotestfile.write(header_row)
+
+        dtypes = {
+            'trainortest': 'object',
+            'epoch': 'int',
+            'batch_idx': 'int',
+            'num_batches': 'int',
+            'loss': 'float32',
+            'accuracy': 'float32',
+            'correct': 'int',
+            'total': 'int',
+            'batch_loss': 'float32',
+            'lr': 'float32',
+            'batch_accuracy': 'float32',
+            'max_batch_acc': 'float32',
+            'min_batch_acc': 'float32'
+        }
+
+    # Set up data storage dictionary for graphing
+    # TODO
 
     #####################################################
     ############### Define train function ###############
@@ -280,7 +307,7 @@ for model_position, current_model in enumerate(model_list):
 
             # Save Training Info to CSV file
             if args.save_training_info:
-                trainfile.write('train,' + all_training_info_line+'\n')             
+                trainfile.write('\n' + 'train,' + all_training_info_line + '\n')             
                 if batch_idx == len(trainloader)-1 or batch_idx == len(trainloader):
                     combotrainfile.write('train,' + all_training_info_line+'\n')
 
@@ -288,23 +315,28 @@ for model_position, current_model in enumerate(model_list):
             ################## Updating the learning rate ##################
             ################################################################
 
+            # args.lr_decay default = 1. and args.lr_stages default = False
+            #print("LR Section")
             if args.lr_decay and args.lr_stages:
                 print('\n\n')
                 print("Learning decay and learning stages cannot be set simultaneously.")
                 print("Learning rate will not be updated.")
                 print('\n\n')
 
-            if args.lr_decay and not args.lr_stages:
+            #print("lr_decay:",args.lr_decay)
+            if args.lr_decay != 1. and not args.lr_stages:
+                #print("lr decay updating")
                 if lr > args.lr_floor:
                     lr *= args.lr_decay
                     if args.lr_momentum:
                         optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) + \
-                            ', momentum=' + str(args.lr_momentum) + ', weight_decay=' + str(1-args.lr_decay) + ')')
+                            ', momentum=' + str(args.lr_momentum) +')' )
                     else:
-                        optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) + \
-                            ', weight_decay=' + str(1-args.lr_decay) + ')')
+                        optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) +')' )
             
-            if args.lr_stages and not args.lr_decay:
+            #print("lr_stages:",args.lr_stages)
+            if args.lr_stages:
+                #print("lr stages updating")
                 if lr > args.lr_floor:
                     if epoch > epoch_threshold:
                         lr /= args.lr_increment
@@ -313,10 +345,9 @@ for model_position, current_model in enumerate(model_list):
 
                         if args.lr_momentum:
                             optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) + \
-                                ', momentum=' + str(args.lr_momentum) + ', weight_decay=' + str(1-args.lr_decay) + ')')
+                                ', momentum=' + str(args.lr_momentum) +')')
                         else:
-                            optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) + \
-                                ', weight_decay=' + str(1-args.lr_decay) + ')')
+                            optimizer = eval('optim.' + args.optimizer + '(net.parameters(), lr=' + str(lr) +')' )
 
     ####################################################
     ############### Define test function ###############
@@ -357,19 +388,21 @@ for model_position, current_model in enumerate(model_list):
                                         loss.data[0], optimizer.defaults['lr'],batch_accuracy, max_batch_acc, min_batch_acc,total_model_params)
 
             test_progress_bar_output = progress_bar(batch_idx, len(testloader), 
-                'Loss: %.3f | Acc: %.2f%% (%d/%d) |Batch Loss: %.2f | lr: %.5f | Batch Acc: %.2f%% (Max: %.2f%%, Min: %.2f%%)'
+                'Loss: %.3f | Acc: %.2f%% (%d/%d) | Batch Loss: %.2f | lr: %.5f | Batch Acc: %.2f%% (Max: %.2f%%, Min: %.2f%%)'
                                     % (test_loss/(batch_idx+1), test_accuracy, correct, total, loss.data[0],
                                         optimizer.defaults['lr'],batch_accuracy, max_batch_acc, min_batch_acc))
 
             # Save Test Info to to the training info CSV file
             if args.save_training_info:
-                testfile.write('test,' + all_testing_info_line+'\n')
+                testfile.write('\n' + 'test,' + all_testing_info_line+'\n')
                 if batch_idx == len(testloader)-1 or batch_idx == len(testloader):
                     combotestfile.write('test,' + all_testing_info_line+'\n')                    
 
             # Save checkpoint.
             if args.save_checkpoints:
-                if test_accuracy > args.checkpoint_accuracy_threshold and test_accuracy > best_test_acc + args.min_checkpoint_improvement:
+                if test_accuracy > args.checkpoint_accuracy_threshold \
+                    and batch_idx >= args.test_batch_size//1.2 \
+                    and test_accuracy > best_test_acc + args.min_checkpoint_improvement:
 
                     if not os.path.isdir(args.checkpoint_dir):
                         os.makedirs(args.checkpoint_dir)
@@ -401,6 +434,36 @@ for model_position, current_model in enumerate(model_list):
     if args.save_training_info:
         trainfile.close()
         testfile.close()
+        accplot_file_name = os.path.join(plot_folder,'accplot_'+str(current_model)+timestamp)
+        lossplot_file_name = os.path.join(plot_folder,'lossplot_'+str(current_model)+timestamp)
+        trainfile = pd.read_csv(training_info_filename,skiprows=1,dtype=dtypes)
+        testfile = pd.read_csv(testing_info_filename,skiprows=2,dtype=dtypes)
+        trainfile = trainfile.groupby('epoch').mean()
+        testfile = testfile.groupby('epoch').mean()
+        
+        # save a plot of train and test accuracy
+        fig, ax1 = plt.subplots(figsize=(16,8))
+        ax1.plot(trainfile.index,trainfile.accuracy,c='red',lw=2,label='train accuracy')
+        ax1.plot(testfile.index,testfile.accuracy,c='blue',lw=2,label='test accuracy')
+        plt.legend(loc='lower right')
+
+        ax2 = ax1.twinx()
+        ax2.plot(testfile.index,testfile.lr,c='green',lw=3,label='learning rate')
+        plt.legend(loc='lower center')
+
+        plt.savefig(accplot_file_name + '.png')
+        
+        # save a plot of train and test loss
+        fig, ax1 = plt.subplots(figsize=(16,8))
+        ax1.plot(trainfile.index,trainfile.loss,c='red',lw=2,label='train loss')
+        ax1.plot(testfile.index,testfile.loss,c='blue',lw=2,label='test loss')
+        plt.legend(loc='upper right')
+
+        ax2 = ax1.twinx()
+        ax2.plot(testfile.index,testfile.lr,c='green',lw=3,label='learning rate')
+        plt.legend(loc='upper center')
+
+        plt.savefig(lossplot_file_name + '.png')
 
 # outside main loop
 if args.save_training_info:
